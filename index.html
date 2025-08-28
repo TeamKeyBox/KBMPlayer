@@ -1,0 +1,851 @@
+<html>
+	<head>
+		<title>KBMPlayer</title>
+	</head>
+	<body style="padding: 0; margin: 0;">
+		<canvas id="plyscreen"></canvas>
+		<script>
+var keyinput = [];
+var keyInputDown = [];
+var keyInputUp = [];
+function OnKeyDown(event) {
+	var i = keyinput.indexOf(event.key);
+	if (i == -1) {
+		keyinput.push(event.key);
+		keyInputDown.push(event.key);
+	}
+	if (event.key == "F1") {
+		event.preventDefault();
+	}
+}
+function OnKeyUp(event) {
+	var i = keyinput.indexOf(event.key);
+	if (i != -1) {
+		keyinput.splice(i, 1);
+	}else{
+		i = keyinput.indexOf(event.key.toUpperCase());
+		if (i != -1) keyinput.splice(i, 1);
+	}
+	keyInputUp.push(event.key);
+}
+function KeyDown(key) {
+	return keyInputDown.includes(key);
+}
+function KeyUp(key) {
+	return keyInputDown.includes(key);
+}
+function Key(key) {
+	return keyinput.includes(key);
+}
+function arrayToStr(array) {
+	var k = "";
+	for (var i in array) {
+		k += array[i];
+	}
+	return k;
+}
+document.onkeydown = event => OnKeyDown(event);
+document.onkeyup = event => OnKeyUp(event);
+
+var cv = document.getElementById("plyscreen");
+var ct = cv.getContext("2d");
+
+var lastTime = Date.now();
+
+var time = 0;
+
+var prevWidth = 0;
+var prevHeight = 0;
+
+//=========================================
+function drawStr(str, ox, oy, fontsize, color, linewidth, aligin, origin) {
+	ct.font = fontsize + "px sans-serif";
+	var mt = ct.measureText(str);
+	var textsize = {x:mt.width, y:mt.actualBoundingBoxAscent};
+	var textorigin = {x:0, y:0};
+	var posaligin = {x:0, y:0};
+	
+	var x = 0;
+	var y = 0;
+	switch (aligin) {
+		case "tl":
+			break;
+		case "tc":
+			x = cv.width / 2;
+			break;
+		case "tr":
+			x = cv.width;
+			break;
+		case "ml":
+			y = cv.height / 2;
+			break;
+		case "mc":
+			x = cv.width / 2;
+			y = cv.height / 2;
+			break;
+		case "mr":
+			x = cv.width;
+			y = cv.height / 2;
+			break;
+		case "bl":
+			y = cv.height;
+			break;
+		case "bc":
+			x = cv.width / 2;
+			y = cv.height;
+			break;
+		case "br":
+			x = cv.width;
+			y = cv.height;
+			break;
+	}
+	posaligin = {x:x, y:y};
+	
+	x = 0;
+	y = 0;
+	
+	switch (origin) {
+		case "tl":
+			y = textsize.y;
+			break;
+		case "tc":
+			x = -textsize.x / 2;
+			y = textsize.y;
+			break;
+		case "tr":
+			x = -textsize.x;
+			y = textsize.y;
+			break;
+		case "ml":
+			y = textsize.y / 2;
+			break;
+		case "mc":
+			x = -textsize.x / 2;
+			y = textsize.y/ 2;
+			break;
+		case "mr":
+			x = -textsize.x;
+			y = textsize.y/ 2;
+			break;
+		case "bl":
+			break;
+		case "bc":
+			x = -textsize.x / 2;
+			break;
+		case "br":
+			x = -textsize.x;
+			break;
+	}
+	textorigin = {x:x, y:y};
+	
+	x = ox + posaligin.x + textorigin.x;
+	y = oy + posaligin.y + textorigin.y;
+	
+	if (linewidth == -1) {
+		ct.fillStyle = color;
+		ct.font = fontsize + "px sans-serif";
+		ct.fillText(str, x, y);
+	}else{
+		ct.strokeStyle = color;
+		ct.lineWidth = linewidth;
+		ct.font = fontsize + "px sans-serif";
+		ct.strokeText(str, x, y);
+	}
+}
+
+//===================================
+
+class Note {
+	constructor() {
+		this.type = 0;
+		this.index = 0;
+		this.timing = 0;
+		this.length = 0;
+		this.typing = "";
+		this.pieces = null;
+	}
+}
+
+class Func {
+	constructor(func, args) {
+		this.func = func;
+		this.args = args;
+		this.timing = 0;
+	}
+}
+
+class Measure {
+	constructor(parent) {
+		this.notes = [];
+		this.parent = parent;
+	}
+	adjustTiming(holding) {
+		var count = this.notes.length;
+		let l = -1;
+		for (let i = 0;i < this.notes.length;i++) {
+			l++;
+			if (this.notes[i] == null) {
+				this.notes.splice(i, 1);
+				i--;
+				continue;
+			}
+			if (this.notes[i].type == 2 || this.notes[i].type == 6 || this.notes[i].type == 8) {
+				holding = this.notes[i];
+			}
+			
+			this.notes[i].timing = this.parent.timing + ((l/count) * this.parent.calcLength());
+			
+			if (this.notes[i].type == 4) {
+				if (holding != null) holding.length = this.notes[i].timing - holding.timing;
+				this.notes.splice(i, 1);
+				i--;
+				holding = null;
+				continue;
+			}
+			if (this.notes[i].type == 1 && holding != null) {
+				holding.pieces.push(this.notes[i].timing);
+				this.notes.splice(i, 1);
+				i--;
+				continue;
+			}
+		}
+		return holding;
+	}
+}
+
+class TrackMeasure {
+	constructor() {
+		this.tracks = [];
+		this.functions = [];
+		this.timing = 0;
+		this.bpm = 120;
+		this.hs = 1;
+		this.length = -1;
+		this.measure = 1;
+	}
+	calcLength() {
+		if (this.length != -1) return this.length;
+		this.length = ((60/this.bpm) * 4) * this.measure;
+		return this.length;
+	}
+}
+
+class Difficulty {
+	constructor(parent) {
+		this.diff = 0;
+		this.BP = 0;
+		this.measures = [];
+		this.author = "";
+		this.parent = parent;
+	}
+}
+
+class KBMFile {
+	constructor() {
+		this.title = "";
+		this.subtitle = "";
+		this.bpm = 120;
+		this.wave = "";
+		this.offset = 0;
+		this.diffList = [];
+		this.metataglist = [];
+	}
+	
+}
+
+function quotationIteration(content, i) {
+	var kansei = "";
+	var prev = "";
+	i++;
+	for (;i < content.length;i++) {
+		let c = content.charAt(i);
+		if (c == '"' && prev != "\\") {
+			break;
+		}else{
+			kansei += c;
+		}
+		prev = c;
+	}
+	return {index: i, content: kansei};
+}
+
+function difficultyIteration(content, i, diff) {
+	var currentMeasure = new TrackMeasure();
+	currentMeasure.bpm = diff.parent.bpm;
+	currentMeasure.timing = diff.parent.offset;
+	var prev = "";
+	let holding = [null, null, null];
+	i++;
+	var curmesindex = 0;
+	var typingpending = [];
+	try {
+		for (;i < content.length; i++) {
+			let c = content.charAt(i);
+			if (c == "\n" || c == "\r") continue;
+			if (c == "/" && prev == "/") {
+				i++
+				for (;i < content.length;i++) {
+					c = content.charAt(i);
+					if (c == "\n" || c == "\r") break;
+				}
+			}
+			if (c == '}' && prev != "\\") {
+				break;
+			}else if (c == '@') {
+				var args = [];
+				var itizi = "";
+				i++;
+				for (;i < content.length;i++) {
+					c = content.charAt(i);
+					if (c == ")") {
+						break;
+					}
+				}
+			}else if (c == '#') {
+				var args = [];
+				var itizi = "";
+				i++;
+				for (;i < content.length;i++) {
+					c = content.charAt(i);
+					if (c == " ") {
+						args.push(itizi);
+						itizi = "";
+					}else if (c == '"') {
+						var q = quotationIteration(content, i);
+						i = q.index;
+						itizi = q.content;
+					}else if (c == "\n" || c == "\r") {
+						if (itizi != "") {
+							args.push(itizi);
+							itizi = "";
+						}
+						break;
+					}else{
+						itizi += c;
+					}
+				}
+				var funcname = args[0];
+				args.shift();
+				currentMeasure.functions.push(new Func(funcname, args));
+				switch (funcname) {
+					case "BPM":
+						currentMeasure.bpm = Number(args[0]);
+						break;
+					case "HS":
+						currentMeasure.hs = Number(args[0]);
+						break;
+					case "Measure":
+						currentMeasure.measure = Number(args[0]) / Number(args[1]);
+						break;
+					case "Typing":
+						typingpending.push(args[0]);
+						break;
+				}
+			}else{
+				var mes = new Measure(currentMeasure);
+				var mesindex = 0;
+				for (;i < content.length;i++) {
+					c = content.charAt(i);
+					if (c == "\n" || c == "\r") continue;
+					if (c == ",") {
+						holding[mesindex] = mes.adjustTiming(holding[mesindex]);
+						currentMeasure.tracks.push(mes);
+						mes = new Measure(currentMeasure);
+						mesindex++;
+						continue;
+					}else if (c == ";") {
+						diff.measures.push(currentMeasure);
+						var prevbpm = currentMeasure.bpm;
+						var prevhs = currentMeasure.hs;
+						var prevmeasure = currentMeasure.measure;
+						var nexttime = currentMeasure.timing + currentMeasure.calcLength();
+						currentMeasure = new TrackMeasure();
+						currentMeasure.bpm = prevbpm;
+						currentMeasure.hs = prevhs;
+						currentMeasure.measure = prevmeasure;
+						currentMeasure.timing = nexttime;
+						mesindex = 0;
+						curmesindex++;
+						break;
+					}
+					var note = new Note();
+					note.index = mesindex;
+					if (mesindex >= 3) {
+						switch (c) {
+							case "0":
+								mes.notes.push(null);
+								break;
+							case "1":
+								note.type = 1;
+								mes.notes.push(note);
+								break;
+							case "2":
+								note.type = 3;
+								mes.notes.push(note);
+								break;
+							default:
+								mes.notes.push(null);
+								break;
+						}
+					}else{
+						switch (c) {
+							case "0":
+								mes.notes.push(null);
+								break;
+							case "1":
+								note.type = 1;
+								mes.notes.push(note);
+								break;
+							case "2":
+								note.type = 2;
+								note.pieces = [];
+								//holding[mesindex] = note;
+								mes.notes.push(note);
+								break;
+							case "3":
+								note.type = 3;
+								mes.notes.push(note);
+								break;
+							case "4":
+								note.type = 4;
+								mes.notes.push(note);
+								break;
+							case "5":
+								note.type = 5;
+								mes.notes.push(note);
+								break;
+							case "6":
+								note.type = 6;
+								note.pieces = [];
+								//holding[mesindex] = note;
+								mes.notes.push(note);
+								break;
+							case "7":
+								note.type = 7;
+								mes.notes.push(note);
+								break;
+							case "8":
+								note.type = 8;
+								//holding[mesindex] = note;
+								mes.notes.push(note);
+								note.typing = typingpending[0];
+								typingpending.shift();
+								break;
+							case "9":
+								note.type = 1;
+								mes.notes.push(note);
+								break;
+							default:
+								mes.notes.push(null);
+								break;
+						}
+					}
+				}
+			}
+			prev = c;
+		}
+	} catch (e) {
+		console.log("An error occur at measure: " + curmesindex);
+		console.log(e);
+	}
+	return i;
+}
+
+function loadKBM(content) {
+	var kansei = new KBMFile();
+	var itizi = "";
+	var itizi2 = "";
+	var currentDiff = new Difficulty(kansei);
+	for (var i = 0; i < content.length;i++) {
+		var c = content.charAt(i);
+		if (c == " " || c == "\n" || c == "\r") continue;
+		if (c == "(") {
+			var mttgname = itizi;
+			itizi = ""
+			var mttgargs = [];
+			i++;
+			for (; i < content.length;i++) {
+				c = content.charAt(i);
+				if (c == " " || c == "\n" || c == "\r") continue;
+				if (c == ",") {
+					mttgargs.push(itizi);
+					itizi = "";
+				}else if (c == '"') {
+					var q = quotationIteration(content, i);
+					i = q.index;
+					itizi = q.content;
+				}else if (c == ")") {
+					if (itizi != "") {
+						mttgargs.push(itizi);
+						itizi = "";
+					}
+					break;
+				}else{
+					itizi += c;
+				}
+			}
+			kansei.metataglist.push({name: mttgname, args: mttgargs});
+			switch(mttgname) {
+				case "meta":
+					kansei.title = mttgargs[0];
+					kansei.wave = mttgargs[1];
+					kansei.bpm = Number(mttgargs[3]);
+					break;
+				case "subtitle":
+					kansei.subtitle = mttgargs[0];
+					break;
+				case "offset":
+					kansei.offset = Number(mttgargs[0]);
+					break;
+				case "diff":
+					currentDiff.diff = Number(mttgargs[0]);
+					currentDiff.BP = Number(mttgargs[1]);
+					if (mttgargs.length >= 3) currentDiff.author = mttgargs[2];
+					break;
+			}
+		}else if (c == "{") {
+			i = difficultyIteration(content, i, currentDiff);
+			kansei.diffList.push(currentDiff);
+			currentDiff = new Difficulty(kansei);
+		}else{
+			itizi += c;
+		}
+	}
+	return kansei;
+}
+
+//===================================
+
+function outExpo(t, b, c, d) {
+	return b + ((1-Math.pow(1-(t/d), 6)) * c)
+}
+function outElastic(t, b, c, d) {
+	if (t == 0) return b; else if (t == d) return b+c; else {
+		return b + ((1-(Math.cos((t/d) * 16 * Math.PI) * Math.pow(1-(t/d), 2))) * c)
+	}
+}
+
+var kbm = null;
+var diffindex = 0;
+var currenttime = 0;
+var ispaused = true;
+var isloaded = false;
+var isautoplay = false;
+var scroll = 1;
+
+var mesmove_time = 0;
+var mesmove_begin = 0;
+var currentMeasure = 0;
+
+var audioElem = null;
+
+function moveMeasure(to) {
+	mesmove_time = 1;
+	mesmove_begin = currentMeasure;
+	currentMeasure = to;
+}
+
+async function loadDirectory(d) {
+	isloaded = false;
+	diffindex = 0;
+	for await (const [key, value] of d.entries()) {
+		//console.log(key);
+		if (key.endsWith(".kbm")) {
+			var fil = await value.getFile();
+			var text = await fil.text();
+			//console.log(loadKBM(text));
+			kbm = loadKBM(text);
+			isloaded = true;
+		}
+	}
+	try {
+		var compaudio = await (await d.getFileHandle("comp.ogg")).getFile();
+		var compaudioURL = URL.createObjectURL(compaudio);
+		//console.log(compaudioURL);
+		if (audioElem != null) audioElem.remove();
+		audioElem = document.createElement("audio");
+		audioElem.src = compaudioURL;
+	} catch(e) {
+	}
+}
+
+function calcHitPositionX(index) {
+	return (cv.width / 2) + (280 * (index == 3 ? -1 : 1));
+}
+
+function calcHitPositionY() {
+	return cv.height - 80;
+}
+
+function calcPosition(index, timing, hs, bpm) {
+	if (index >= 3) {
+		return {x: calcHitPositionX(index) + ((currenttime - timing) * hs * bpm * scroll * (index == 3 ? 1 : -1)), y: cv.height / 2};
+	}else{
+		return {x: (cv.width / 2) + ((index-1) * 120), y: calcHitPositionY() + ((currenttime - timing) * hs * bpm * scroll * 3)};
+	}
+}
+
+function DrawNote(note, x, y, x2 = 0, y2 = 0, piecepos = []) {
+	ct.save();
+	ct.lineWidth = 2;
+	switch (note.type) {
+		case 1:
+			ct.strokeStyle = "#ffffff";
+			break;
+		case 2:
+			ct.strokeStyle = "#00ffff";
+			break;
+		case 3:
+			ct.strokeStyle = "#0000ff";
+			break;
+		case 5:
+			ct.strokeStyle = "#ff00ff";
+			break;
+		case 6:
+			ct.strokeStyle = "#ff8800";
+			break;
+		case 7:
+			ct.strokeStyle = "#ffffff";
+			ct.setLineDash([4, 4]);
+			break;
+		case 8:
+			ct.strokeStyle = "#ffffff";
+			break;
+	}
+	ct.fillStyle = "rgb(20% 20% 20% / 70%)";
+	if (note.type == 2 || note.type == 6) {
+		ct.beginPath();
+		ct.moveTo(x - 45, y - 45);
+		ct.lineTo(x2 - 45, y2 + 45);
+		ct.lineTo(x2 + 45, y2 + 45);
+		ct.lineTo(x + 45, y - 45);
+		ct.stroke();
+		ct.fill();
+		ct.fillRect(x2 - 45, y2 - 45, 90, 90);
+		ct.strokeRect(x2 - 45, y2 - 45, 90, 90);
+		
+		ct.save();
+		ct.fillStyle = "#ffffff";
+		ct.strokeStyle = "#ffffff";
+		for (var i in piecepos) {
+			var pp = piecepos[i];
+			ct.fillRect(pp.x - 45, pp.y - 1, 90, 2);
+			ct.strokeRect(pp.x - 8, pp.y - 8, 16, 16);
+		}
+		ct.restore();
+	}
+	ct.fillRect(x - 45, y - 45, 90, 90);
+	ct.strokeRect(x - 45, y - 45, 90, 90);
+	if (!(note.type == 7 || note.type == 8)) drawStr(note.index+1, x, y, 56, "#ffffff", -1, "tl", "mc");
+	
+	ct.restore();
+}
+
+var GhostNotes = [];
+for (var i = 0;i < 5;i++) {
+	var note = new Note();
+	note.type = 1;
+	note.index = i;
+	GhostNotes.push(note);
+}
+
+let currentDirectory = null;
+
+setInterval(() => {
+	var deltaTime = (Date.now() - lastTime)/1000;
+	lastTime = Date.now();
+	
+	if (!ispaused) {
+		//currenttime += deltaTime;
+		currenttime = audioElem.currentTime;
+	}else if (kbm != null) {
+		var diff = kbm.diffList[diffindex];
+		if (mesmove_time > 0) {
+			mesmove_time -= deltaTime;
+			currenttime = outExpo(1-mesmove_time, diff.measures[mesmove_begin].timing, diff.measures[currentMeasure].timing - diff.measures[mesmove_begin].timing, 1);
+		}else{
+			currenttime = diff.measures[currentMeasure].timing;
+		}
+	}
+	
+	//===================================
+	
+	ct.fillStyle = "#222222";
+	ct.fillRect(0, 0, cv.width, cv.height);
+	
+	ct.fillStyle = "#333333";
+	ct.fillRect(0, (cv.height / 2) - 80, cv.width, 160);
+	ct.fillStyle = "#ffffff";
+	ct.fillRect(0, (cv.height / 2) - 80, cv.width, 2);
+	ct.fillRect(0, (cv.height / 2) + 78, cv.width, 2);
+	
+	ct.fillStyle = "#333333";
+	ct.fillRect((cv.width / 2) - 210, 0, 420, cv.height);
+	ct.fillStyle = "#ffffff";
+	ct.fillRect((cv.width / 2) - 210, 0, 2, cv.height);
+	ct.fillRect((cv.width / 2) + 208, 0, 2, cv.height);
+	
+	if (isautoplay) {
+		drawStr("AutoPlay", 0, 0, 56, "#ffffff", -1, "mc", "mc");
+	}
+	
+	for (var i = 0;i < 5;i++) {
+		var p = calcPosition(i, 0, 0, 0);
+		ct.globalAlpha = 0.5;
+		DrawNote(GhostNotes[i], p.x, p.y);
+		ct.globalAlpha = 1;
+	}
+	var postrender = null;
+	if (kbm != null) {
+		if (KeyDown("ArrowLeft")) {
+			if (diffindex > 0) {
+				diffindex--;
+				if (kbm.diffList[diffindex].measures.length <= currentMeasure) currentMeasure = kbm.diffList[diffindex].measures.length;
+			}
+		}
+		if (KeyDown("ArrowRight")) {
+			if (diffindex < kbm.diffList.length-1) {
+				diffindex++;
+				if (kbm.diffList[diffindex].measures.length <= currentMeasure) currentMeasure = kbm.diffList[diffindex].measures.length;
+			}
+		}
+		var diff = kbm.diffList[diffindex];
+		var hitopacity = [0, 0, 0, 0, 0];
+		for (var i in diff.measures) {
+			var mes = diff.measures[i];
+			for (var mesindex = 0;mesindex < 5;mesindex++) {
+				if (mes.tracks.length != 5) console.log("不正なMeasure: " + i);
+				for (var l = mes.tracks[mesindex].notes.length-1;l >= 0;l--) {
+					let note = mes.tracks[mesindex].notes[l];
+					var p = calcPosition(mesindex, note.timing, mes.hs, mes.bpm);
+					var pD = calcPosition(mesindex, currenttime, mes.hs, mes.bpm);
+					var p2 = calcPosition(mesindex, note.timing + note.length, mes.hs, mes.bpm);
+					var piecepos = [];
+					for (var k in note.pieces) {
+						if (note.pieces[k] < currenttime) continue;
+						var pp = calcPosition(mesindex, note.pieces[k], mes.hs, mes.bpm);
+						piecepos.push(pp);
+					}
+					if ((note.type == 2 || note.type == 6) && note.timing <= currenttime && note.timing + note.length > currenttime) {
+						p = pD;
+						if (note.type == 6) {
+							var change = outElastic(currenttime - note.timing, 45, -45, note.length);
+							p.x += change;
+							p2.x += change;
+						}
+					}
+					if (note.type == 8 && note.timing <= currenttime && note.timing + note.length > currenttime) {
+						postrender = () => {
+							ct.fillStyle = "#000000";
+							ct.globalAlpha = 0.5;
+							ct.fillRect(0, 0, cv.width, cv.height);
+							ct.globalAlpha = 1;
+							ct.fillStyle = "#333333";
+							ct.strokeStyle = "#ffffff";
+							ct.fillRect(0, cv.height/2 - 150, cv.width, 300);
+							ct.strokeRect(0, cv.height/2 - 150, cv.width, 300);
+							drawStr(note.typing.toUpperCase(), 0, 0, 64, "#ffffff", -1, "mc", "mc");
+						}
+					}
+					if ((mesindex < 3 && !isautoplay) || note.timing + note.length >= currenttime) DrawNote(note, p.x, p.y, p2.x, p2.y, piecepos);
+					if (mesindex < 3 && isautoplay && currenttime >= note.timing && note.timing + 0.15 >= currenttime) {
+						hitopacity[mesindex] = (0.15 - (currenttime - note.timing)) / 0.15;
+					}
+					if (mesindex >= 3 && isautoplay && note.type == 3 && currenttime >= note.timing && note.timing + 0.3 >= currenttime) {
+						hitopacity[mesindex] = (0.3 - (currenttime - note.timing)) / 0.3;
+					}
+				}
+			}
+		}
+		for (var i = 0;i < 3;i++) {
+			if (hitopacity[i] > 0) {
+				var ox = (cv.width / 2) + ((i-1) * 120);
+				var gradient = ct.createLinearGradient(ox, cv.height, ox, cv.height - 400);
+				gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
+				gradient.addColorStop(1.0, 'rgba(255, 255, 255, 0)');
+				ct.fillStyle = gradient;
+				ct.globalAlpha = hitopacity[i];
+				ct.fillRect(ox - 60, cv.height - 400, 120, 400);
+				ct.globalAlpha = 1;
+			}
+		}
+		for (var i = 3;i < 5;i++) {
+			if (hitopacity[i] > 0) {
+				var ox = calcHitPositionX(i) + (i == 3 ? 70 : -70);
+				//var gradient = ct.createLinearGradient(ox, 0, i == 3 ? 0 : cv.width, 0);
+				//gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
+				//gradient.addColorStop(1.0, 'rgba(255, 255, 255, 0)');
+				ct.fillStyle = "rgba(255, 255, 255, 0.5)";
+				ct.globalAlpha = hitopacity[i];
+				ct.fillRect(i == 3 ? 0 : ox, 0, i == 3 ? ox : (cv.width - ox), cv.height);
+				ct.globalAlpha = 1;
+			}
+		}
+
+		if (KeyDown("ArrowUp")) {
+			if (diff.measures.length > currentMeasure+1) moveMeasure(currentMeasure+1);
+		}
+		if (KeyDown("ArrowDown")) {
+			if (currentMeasure-1 >= 0) moveMeasure(currentMeasure-1);
+		}
+		drawStr("CurrentMeasure: " + currentMeasure, 0, 30, 24, "#ffffff", -1, "tl", "tl");
+		drawStr("CurrentTime: " + currenttime, 0, 60, 24, "#ffffff", -1, "tl", "tl");
+		drawStr("CurrentDiff: " + diffindex, 0, 90, 24, "#ffffff", -1, "tl", "tl");
+		
+		drawStr(kbm.title, 0, -200, 32, "#ffffff", -1, "br", "tr");
+		drawStr(kbm.subtitle, 0, -160, 24, "#ffffff", -1, "br", "tr");
+	}
+	drawStr("L: Load KBM file", 10, -30, 24, "#ffffff", -1, "bl", "tl");
+	drawStr("F1: Toggle Auto", 10, -60, 24, "#ffffff", -1, "bl", "tl");
+	drawStr("↑↓: Move", 10, -90, 24, "#ffffff", -1, "bl", "tl");
+	drawStr("←→: Switch Difficulty", 10, -120, 24, "#ffffff", -1, "bl", "tl");
+	drawStr("Q: Reload / Stop", 10, -150, 24, "#ffffff", -1, "bl", "tl");
+	
+	if (postrender != null) postrender();
+	
+	if (KeyDown("l")) {
+		window.showDirectoryPicker({id: "kbmloader"}).then((d) => {
+			currentDirectory = d;
+			loadDirectory(d);
+		}).catch((e) => {});
+	}
+	if (KeyDown(" ") && ispaused) {
+		if (isloaded) {
+			audioElem.play();
+			audioElem.currentTime = currenttime;
+			audioElem.onseeked = () => {
+				ispaused = false;
+			};
+		}
+	}
+	if (KeyDown("q")) {
+		if (isloaded) {
+			if (!ispaused) {
+				audioElem.pause();
+				ispaused = true;
+			}
+			if (currentDirectory != null) {
+				loadDirectory(currentDirectory);
+			}
+		}
+	}
+	if (KeyDown("F1")) {
+		isautoplay = !isautoplay;
+	}
+	
+	//===================================
+	
+	if (prevWidth != document.body.clientWidth || prevHeight != document.body.clientHeight) {
+		cv.width = document.body.clientWidth;
+		prevWidth = document.body.clientWidth;
+		cv.height = document.body.clientHeight;
+		prevHeight = document.body.clientHeight;
+	}
+	
+	keyInputDown = [];
+	keyInputUp = [];
+}, 1000/60);
+
+		</script>
+	</body>
+</html>
