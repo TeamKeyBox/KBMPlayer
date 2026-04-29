@@ -547,7 +547,7 @@ function moveMeasure(to) {
 
 async function loadDirectory(d) {
 	isloaded = false;
-	diffindex = 0;
+	//diffindex = 0;
 	for await (const [key, value] of d.entries()) {
 		//console.log(key);
 		if (key.endsWith(".kbm")) {
@@ -555,6 +555,9 @@ async function loadDirectory(d) {
 			var text = await fil.text();
 			//console.log(loadKBM(text));
 			kbm = loadKBM(text);
+			if (diffindex >= kbm.diffList.length) {
+				diffindex = 0;
+			}
 			isloaded = true;
 		}
 	}
@@ -641,6 +644,19 @@ function DrawNote(note, x, y, x2 = 0, y2 = 0, piecepos = []) {
 	ct.restore();
 }
 
+function DrawNoteSpear(index, x, y) {
+	ct.save();
+
+	ct.strokeStyle = "#ffffff";
+	ct.strokeRect(x - 8, y - 8, 16, 16);
+
+	ct.beginPath();
+	ct.moveTo(x - (((index-3.5)*2) * 8), y);
+	ct.lineTo(x - (((index-3.5)*2) * 64), y);
+	ct.stroke();
+	ct.restore();
+}
+
 var GhostNotes = [];
 for (var i = 0;i < 5;i++) {
 	var note = new Note();
@@ -711,10 +727,34 @@ setInterval(() => {
 		}
 		var diff = kbm.diffList[diffindex];
 		var hitopacity = [0, 0, 0, 0, 0];
-		for (var i in diff.measures) {
+		for (var i = diff.measures.length-1;i >= 0;i--) {
 			var mes = diff.measures[i];
+			
+			ct.save();
+
+			ct.strokeWidth = 4;
+			ct.strokeStyle = "#ffffff";
+			ct.globalAlpha = 0.5;
+
+			var mesy = calcPosition(0, mes.timing, mes.hs, mes.bpm).y;
+
+			ct.beginPath();
+			ct.moveTo((cv.width / 2) - 210, mesy);
+			ct.lineTo((cv.width / 2) + 210, mesy);
+
+			ct.stroke();
+
+			ct.globalAlpha = 1;
+
+			ct.restore();
+
+			if (mes == undefined || mes == null) continue;
 			for (var mesindex = 0;mesindex < 5;mesindex++) {
 				if (mes.tracks.length != 5) console.log("不正なMeasure: " + i);
+				if (mesindex < 3) {
+					var bottom = calcPosition(mesindex, mes.timing, mes.hs, mes.bpm).y + 45;
+					if (bottom < 0) continue;
+				}
 				for (var l = mes.tracks[mesindex].notes.length-1;l >= 0;l--) {
 					let note = mes.tracks[mesindex].notes[l];
 					var p = calcPosition(mesindex, note.timing, mes.hs, mes.bpm);
@@ -747,7 +787,13 @@ setInterval(() => {
 							drawStr(note.typing.toUpperCase(), 0, 0, 64, "#ffffff", -1, "mc", "mc");
 						}
 					}
-					if ((mesindex < 3 && !isautoplay) || note.timing + note.length >= currenttime) DrawNote(note, p.x, p.y, p2.x, p2.y, piecepos);
+					if ((mesindex < 3 && !isautoplay) || note.timing + note.length >= currenttime) {
+						DrawNote(note, p.x, p.y, p2.x, p2.y, piecepos);
+						if (mesindex >= 3) {
+							var phonrai = calcPosition(0, note.timing, mes.hs, mes.bpm);
+							DrawNoteSpear(mesindex, cv.width/2 + (((mesindex-3.5)*2) * 210), phonrai.y);
+						}
+					}
 					if (mesindex < 3 && isautoplay && currenttime >= note.timing && note.timing + 0.15 >= currenttime) {
 						hitopacity[mesindex] = (0.15 - (currenttime - note.timing)) / 0.15;
 					}
