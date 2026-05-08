@@ -459,6 +459,11 @@ function loadKBM(content) {
 	for (var i = 0; i < content.length;i++) {
 		var c = content.charAt(i);
 		if (c == " " || c == "\n" || c == "\r") continue;
+		var actualprev = content.charAt(i-1);
+		if (i > 0 && i < content.length-1 && c == "/" && (actualprev == "\n" || actualprev == "\r") && content.charAt(i+1) == "/") {
+			for (;content.charAt(i) == "\n";i++) {}
+			continue;
+		}
 		if (c == "(") {
 			var mttgname = itizi;
 			itizi = ""
@@ -795,10 +800,10 @@ setInterval(() => {
 						}
 					}
 					if (mesindex < 3 && isautoplay && currenttime >= note.timing && note.timing + 0.15 >= currenttime) {
-						hitopacity[mesindex] = (0.15 - (currenttime - note.timing)) / 0.15;
+						hitopacity[mesindex] = Math.max((0.15 - (currenttime - note.timing)) / 0.15, hitopacity[mesindex]);
 					}
 					if (mesindex >= 3 && isautoplay && note.type == 3 && currenttime >= note.timing && note.timing + 0.3 >= currenttime) {
-						hitopacity[mesindex] = (0.3 - (currenttime - note.timing)) / 0.3;
+						hitopacity[mesindex] = Math.max((0.3 - (currenttime - note.timing)) / 0.3, hitopacity[mesindex]);
 					}
 				}
 			}
