@@ -8,6 +8,7 @@
 var keyinput = [];
 var keyInputDown = [];
 var keyInputUp = [];
+var wheelDelta = 0;
 function OnKeyDown(event) {
 	var i = keyinput.indexOf(event.key);
 	if (i == -1) {
@@ -28,6 +29,9 @@ function OnKeyUp(event) {
 	}
 	keyInputUp.push(event.key);
 }
+function OnWheel(event) {
+	wheelDelta += event.deltaY;
+}
 function KeyDown(key) {
 	return keyInputDown.includes(key);
 }
@@ -46,6 +50,7 @@ function arrayToStr(array) {
 }
 document.onkeydown = event => OnKeyDown(event);
 document.onkeyup = event => OnKeyUp(event);
+document.onwheel = event => OnWheel(event);
 
 var cv = document.getElementById("plyscreen");
 var ct = cv.getContext("2d");
@@ -163,6 +168,9 @@ class Note {
 		this.length = 0;
 		this.typing = "";
 		this.pieces = null;
+		this.piecesplayed = null;
+		this.isplayed = false;
+		this.isechoed = false;
 	}
 }
 
@@ -204,6 +212,7 @@ class Measure {
 			}
 			if (this.notes[i].type == 1 && holding != null) {
 				holding.pieces.push(this.notes[i].timing);
+				holding.piecesplayed.push(false);
 				this.notes.splice(i, 1);
 				i--;
 				continue;
@@ -399,6 +408,7 @@ function difficultyIteration(content, i, diff) {
 							case "2":
 								note.type = 2;
 								note.pieces = [];
+								note.piecesplayed = [];
 								//holding[mesindex] = note;
 								mes.notes.push(note);
 								break;
@@ -417,6 +427,7 @@ function difficultyIteration(content, i, diff) {
 							case "6":
 								note.type = 6;
 								note.pieces = [];
+								note.piecesplayed = [];
 								//holding[mesindex] = note;
 								mes.notes.push(note);
 								break;
@@ -543,6 +554,27 @@ var mesmove_begin = 0;
 var currentMeasure = 0;
 
 var audioElem = null;
+var tapSound = document.createElement("audio");
+tapSound.src = "./tapnote.wav";
+var katiSound = document.createElement("audio");
+katiSound.src = "./kati.wav";
+var echoSound = document.createElement("audio");
+echoSound.src = "./echo.wav";
+
+function playSoundTap() {
+	tapSound.currentTime = 0;
+	tapSound.play();
+}
+
+function playSoundKati() {
+	katiSound.currentTime = 0;
+	katiSound.play();
+}
+
+function playSoundEcho() {
+	echoSound.currentTime = 0;
+	echoSound.play();
+}
 
 function moveMeasure(to) {
 	mesmove_time = 1;
@@ -767,7 +799,15 @@ setInterval(() => {
 					var p2 = calcPosition(mesindex, note.timing + note.length, mes.hs, mes.bpm);
 					var piecepos = [];
 					for (var k in note.pieces) {
-						if (note.pieces[k] < currenttime) continue;
+						if (note.pieces[k] < currenttime + 0.08) {
+							if (!ispaused && isautoplay && !note.piecesplayed[k]) {
+								playSoundKati();
+								note.piecesplayed[k] = true;
+							}
+						}
+						if (note.pieces[k] < currenttime) {
+							continue;
+						}
 						var pp = calcPosition(mesindex, note.pieces[k], mes.hs, mes.bpm);
 						piecepos.push(pp);
 					}
@@ -805,6 +845,14 @@ setInterval(() => {
 					if (mesindex >= 3 && isautoplay && note.type == 3 && currenttime >= note.timing && note.timing + 0.3 >= currenttime) {
 						hitopacity[mesindex] = Math.max((0.3 - (currenttime - note.timing)) / 0.3, hitopacity[mesindex]);
 					}
+					if (!ispaused && isautoplay && note.type != 8 && currenttime >= note.timing - 0.08 && !note.isplayed) {
+						if (note.type == 7) {
+							playSoundKati();
+						}else{
+							playSoundTap();
+						}
+						note.isplayed = true;
+					}
 				}
 			}
 		}
@@ -833,10 +881,10 @@ setInterval(() => {
 			}
 		}
 
-		if (KeyDown("ArrowUp")) {
+		if (KeyDown("ArrowUp") || wheelDelta < 0) {
 			if (diff.measures.length > currentMeasure+1) moveMeasure(currentMeasure+1);
 		}
-		if (KeyDown("ArrowDown")) {
+		if (KeyDown("ArrowDown") || wheelDelta > 0) {
 			if (currentMeasure-1 >= 0) moveMeasure(currentMeasure-1);
 		}
 		drawStr("CurrentMeasure: " + currentMeasure, 0, 30, 24, "#ffffff", -1, "tl", "tl");
@@ -862,6 +910,18 @@ setInterval(() => {
 	}
 	if (KeyDown(" ") && ispaused) {
 		if (isloaded) {
+			var diff = kbm.diffList[diffindex];
+			for (var i in diff.measures) {
+				var note = diff.measures[i];
+				var isplayed = note.timing < currenttime;
+				note.isplayed = isplayed;
+				note.isechoed = isplayed;
+				if (note.piecesplayed != null) {
+					for (var l in note.piecesplayed) {
+						note.piecesplayed[l] = isplayed;
+					}
+				}
+			}
 			audioElem.play();
 			audioElem.currentTime = currenttime;
 			audioElem.onseeked = () => {
@@ -895,6 +955,7 @@ setInterval(() => {
 	
 	keyInputDown = [];
 	keyInputUp = [];
+	wheelDelta = 0;
 }, 1000/60);
 
 		</script>
