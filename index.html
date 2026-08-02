@@ -1,9 +1,19 @@
 <html>
 	<head>
 		<title>KBMPlayer</title>
+		<style>
+			* {
+				color: white;
+			}
+		</style>
 	</head>
 	<body style="padding: 0; margin: 0;">
 		<canvas id="plyscreen"></canvas>
+		<div style="position: absolute; bottom: 50px; right: 10px;">
+			デバイス個別オフセットms(楽曲には無関係です！):
+			<span id="offset_text">0</span>
+			<input id="offset" type="range" min="-999", max="999" value="0" onchange="window.localStorage.setItem('offset', offsetslider.value);">
+		</div>
 		<script>
 var keyinput = [];
 var keyInputDown = [];
@@ -704,9 +714,18 @@ for (var i = 0;i < 5;i++) {
 
 let currentDirectory = null;
 
+var offsetslider = document.getElementById("offset");
+var offsettext = document.getElementById("offset_text");
+var offsetdelay = 0;
+
+offsetslider.value = Number(window.localStorage.getItem("offset"));
+
 setInterval(() => {
 	var deltaTime = (Date.now() - lastTime)/1000;
 	lastTime = Date.now();
+	
+	offsettext.innerHTML = offsetslider.value;
+	offsetdelay = Number(offsetslider.value) / 1000;
 	
 	if (!ispaused) {
 		//currenttime += deltaTime;
@@ -799,7 +818,7 @@ setInterval(() => {
 					var p2 = calcPosition(mesindex, note.timing + note.length, mes.hs, mes.bpm);
 					var piecepos = [];
 					for (var k in note.pieces) {
-						if (note.pieces[k] < currenttime + 0.08) {
+						if (note.pieces[k] < currenttime + offsetdelay) {
 							if (!ispaused && isautoplay && !note.piecesplayed[k]) {
 								playSoundKati();
 								note.piecesplayed[k] = true;
@@ -845,7 +864,7 @@ setInterval(() => {
 					if (mesindex >= 3 && isautoplay && note.type == 3 && currenttime >= note.timing && note.timing + 0.3 >= currenttime) {
 						hitopacity[mesindex] = Math.max((0.3 - (currenttime - note.timing)) / 0.3, hitopacity[mesindex]);
 					}
-					if (!ispaused && isautoplay && note.type != 8 && currenttime >= note.timing - 0.08 && !note.isplayed) {
+					if (!ispaused && isautoplay && note.type != 8 && currenttime >= note.timing - offsetdelay && !note.isplayed) {
 						if (note.type == 7) {
 							playSoundKati();
 						}else{
